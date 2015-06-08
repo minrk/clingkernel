@@ -84,7 +84,7 @@ class ClingKernel(Kernel):
         return self._banner
 
     language_info = {'name': 'c++',
-                     'codemirror_mode': 'c++',
+                     'codemirror_mode': 'clike',
                      'mimetype': ' text/x-c++src',
                      'file_extension': '.c++'}
     
