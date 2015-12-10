@@ -13,6 +13,7 @@ import ctypes
 from contextlib import contextmanager
 from fcntl import fcntl, F_GETFL, F_SETFL
 import os
+import shutil
 import select
 import sys
 import threading
@@ -43,17 +44,33 @@ class ClingKernel(Kernel):
         return 'cling-%s' % self.language_version
         return self._banner
 
-        # codemirror_mode='clike' *should* work but doesn't, using the mimetype instead
+    # codemirror_mode='clike' *should* work but doesn't, using the mimetype instead
     language_info = {'name': 'c++',
                      'codemirror_mode': 'text/x-c++src',
                      'mimetype': ' text/x-c++src',
                      'file_extension': '.c++'}
     
-    cling = Unicode(config=True,
-        help="Path to cling if not on your PATH."
-    )
     flush_interval = Float(0.25, config=True)
-    
+
+    def __init__(self, **kwargs):
+        super(ClingKernel, self).__init__(**kwargs)
+        whichCling = shutil.which('cling')
+        if whichCling:
+            clingInstDir = os.path.dirname(os.path.dirname(whichCling))
+        else:
+            #clingInstDir = '/Users/axel/build/cling/cling-all-in-one/clion-inst'
+            clingInstDir = '/Users/axel/Library/Caches/CLion12/cmake/generated/e0f22745/e0f22745/Debug'
+        self.libclingJupyter = ctypes.CDLL(clingInstDir + "/lib/libclingJupyter.dylib", mode = ctypes.RTLD_GLOBAL)
+        self.libclingJupyter.cling_create.restype = ctypes.c_void_p
+        self.libclingJupyter.cling_eval.restype = ctypes.c_char_p
+        strarr = ctypes.c_char_p*4
+        argv = strarr(b"clingJupyter",b"",b"",b"")
+        llvmresourcedir = ctypes.c_char_p(clingInstDir.encode('utf8'))
+        self.interp = ctypes.c_void_p(self.libclingJupyter.cling_create(4, argv, llvmresourcedir))
+
+        self.libclingJupyter.cling_complete_start.restype = ctypes.c_void_p
+        self.libclingJupyter.cling_complete_next.restype = ctypes.c_char_p
+
     @contextmanager
     def forward_stream(self, name):
         """Capture stdout and forward it as stream messages"""
@@ -109,13 +126,8 @@ class ClingKernel(Kernel):
             os.close(save_fd)
 
     def run_cell(self, code, silent=False):
-        """Dummy run cell while waiting for cling ctypes API"""
-        import time
-        
-        for i in range(5):
-            libc.printf((code + '\n').encode('utf8'))
-            time.sleep(0.2 * i)
-    
+        return self.libclingJupyter.cling_eval(self.interp, ctypes.c_char_p(code.encode('utf8')))
+
     def do_execute(self, code, silent, store_history=True,
                    user_expressions=None, allow_stdin=False):
         if not code.strip():
@@ -128,7 +140,23 @@ class ClingKernel(Kernel):
         status = 'ok'
         
         with self.forward_stream('stdout'), self.forward_stream('stderr'):
-            self.run_cell(code, silent)
+            stringResult = self.run_cell(code, silent)
+
+        if stringResult == 0:
+            status = 'error'
+        else:
+            self.session.send(
+                self.iopub_socket,
+                'execute_result', 
+                content={
+                    'data': {
+                        'text/plain': stringResult.decode('utf8', replace),
+                    },
+                },
+                parent=self.parent_header
+            )
+            self.libclingJupyter.cling_eval_free(stringResult)
+
 
         reply = {
             'status': status,
@@ -145,7 +173,11 @@ class ClingKernel(Kernel):
             reply.update(err)
         elif status == 'ok':
             reply.update({
-                'payload': [],
+                'payload': [{
+                  'source': 'set_next_input',
+                  'replace': True,
+                  'text':'//THIS IS MAGIC\n' + code
+                }],
                 'user_expressions': {},
             })
         else:
