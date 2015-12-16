@@ -205,6 +205,7 @@ class ClingKernel(Kernel):
                 self.iopub_socket,
                 'execute_result', 
                 content={
+                    'execution_count': self.execution_count,
                     'data': {
                         'text/plain': stringResult.decode('utf8', 'replace'),
                     },
