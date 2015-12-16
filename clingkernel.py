@@ -230,14 +230,17 @@ class ClingKernel(Kernel):
             self.send_response(self.iopub_socket, 'error', err)
             reply.update(err)
         elif status == 'ok':
-            reply.update({
-                'payload': [{
-                  'source': 'set_next_input',
-                  'replace': True,
-                  'text':'//THIS IS MAGIC\n' + code
-                }],
-                'user_expressions': {},
-            })
+            magic = '//THIS IS MAGIC'
+            if not code.startswith(magic):
+                reply.update({
+                    'payload': [{
+                      'source': 'set_next_input',
+                      'replace': True,
+                      'clear_output': False, # Requires notebook ≥ 4.1.0
+                      'text': '\n'.join([magic, code])
+                    }],
+                    'user_expressions': {},
+                })
         else:
             raise ValueError("Invalid status: %r" % status)
         
